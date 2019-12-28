@@ -15,6 +15,8 @@ from keras.regularizers import l2
 from yolo3.utils import compose
 
 
+import tools
+
 @wraps(Conv2D)
 def DarknetConv2D(*args, **kwargs):
     """Wrapper to set Darknet parameters for Convolution2D."""
@@ -213,10 +215,17 @@ def yolo_eval(yolo_outputs,
     classes_ = []
     for c in range(num_classes):
         # TODO: use keras backend instead of tf.
-        class_boxes = tf.boolean_mask(boxes, mask[:, c])
-        class_box_scores = tf.boolean_mask(box_scores[:, c], mask[:, c])
-        nms_index = tf.image.non_max_suppression(
-            class_boxes, class_box_scores, max_boxes_tensor, iou_threshold=iou_threshold)
+
+        # class_boxes = tf.boolean_mask(boxes, mask[:, c])
+        class_boxes = boxes[mask[:, c] == True]
+
+        # class_box_scores = tf.boolean_mask(box_scores[:, c], mask[:, c])
+        sub_box_scores = box_scores[:, c]
+        class_box_scores = sub_box_scores[mask[:, c] == True]
+
+        # nms_index = tf.image.non_max_suppression(class_boxes, class_box_scores, max_boxes_tensor, iou_threshold=iou_threshold)
+        nms_index = tools.non_max_suppression_fast(class_boxes,iou_threshold)
+
         class_boxes = K.gather(class_boxes, nms_index)
         class_box_scores = K.gather(class_box_scores, nms_index)
         classes = K.ones_like(class_box_scores, 'int32') * c
@@ -384,7 +393,9 @@ def yolo_loss(args, anchors, num_classes, ignore_thresh=.5, print_loss=False):
         box_loss_scale = 2 - y_true[l][...,2:3]*y_true[l][...,3:4]
 
         # Find ignore mask, iterate over each of batch.
+        # ignore_mask = np.ndarray(shape=1, dtype=K.dtype(y_true))
         ignore_mask = tf.TensorArray(K.dtype(y_true[0]), size=1, dynamic_size=True)
+        print("SIZE ", ignore_mask.shape)
         object_mask_bool = K.cast(object_mask, 'bool')
         def loop_body(b, ignore_mask):
             true_box = tf.boolean_mask(y_true[l][b,...,0:4], object_mask_bool[b,...,0])
@@ -409,5 +420,6 @@ def yolo_loss(args, anchors, num_classes, ignore_thresh=.5, print_loss=False):
         class_loss = K.sum(class_loss) / mf
         loss += xy_loss + wh_loss + confidence_loss + class_loss
         if print_loss:
-            loss = tf.Print(loss, [loss, xy_loss, wh_loss, confidence_loss, class_loss, K.sum(ignore_mask)], message='loss: ')
+            # loss = tf.Print(loss, [loss, xy_loss, wh_loss, confidence_loss, class_loss, K.sum(ignore_mask)], message='loss: ')
+            K.print_tensor([loss, xy_loss, wh_loss, confidence_loss, class_loss, K.sum(ignore_mask)], message='loss: ')
     return loss
